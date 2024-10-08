@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"websocket"
+	"websocket/extended"
 )
 
 func main() {
@@ -14,34 +15,41 @@ func main() {
 			fmt.Println(err.Error())
 			return
 		}
-		for {
-			msg, err := conn.Read()
-			if err != nil {
-				fmt.Println(err.Error())
-				return
-			}
+		extended.OnMessage(conn, func(msg *websocket.Message) {
 			fmt.Printf("-> %s\n", msg)
-
-			fullmsg := &websocket.Message{
+			conn.Write(&websocket.Message{
 				Type: websocket.MessageText,
 				Data: []byte(hex.EncodeToString(msg.Data)),
-			}
-			err = conn.Write(fullmsg)
-			if err != nil {
-				fmt.Println(err.Error())
-				continue
-			}
-			fmt.Printf("<- %s\n", fullmsg)
+			})
+		})
+		// for {
+		// 	msg, err := conn.Read()
+		// 	if err != nil {
+		// 		fmt.Println(err.Error())
+		// 		return
+		// 	}
+		// 	fmt.Printf("-> %s\n", msg)
 
-			fmt.Printf("pinging server... ")
-			alive, err := conn.Ping(nil)
-			if err != nil {
-				fmt.Println(err.Error())
-				continue
-			}
-			fmt.Printf("alive: %t\n", alive)
+		// 	fullmsg := &websocket.Message{
+		// 		Type: websocket.MessageText,
+		// 		Data: []byte(hex.EncodeToString(msg.Data)),
+		// 	}
+		// 	err = conn.Write(fullmsg)
+		// 	if err != nil {
+		// 		fmt.Println(err.Error())
+		// 		continue
+		// 	}
+		// 	fmt.Printf("<- %s\n", fullmsg)
 
-		}
+		// 	fmt.Printf("pinging server... ")
+		// 	alive, err := conn.Ping(nil)
+		// 	if err != nil {
+		// 		fmt.Println(err.Error())
+		// 		continue
+		// 	}
+		// 	fmt.Printf("alive: %t\n", alive)
+
+		// }
 	})
 
 	http.ListenAndServe(":8000", nil)
