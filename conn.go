@@ -228,7 +228,7 @@ func (c *Conn) Write(message *Message) Error {
 func (c *Conn) Ping(ctx context.Context) (bool, Error) {
 
 	c.pingMx.Lock()
-	if c.pingCtx != nil {
+	if c.pingCtx == nil {
 		var cancel context.CancelFunc
 		if ctx == nil {
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second*5)

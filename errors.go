@@ -42,7 +42,7 @@ type err struct {
 }
 
 func (e err) Kind() string {
-	return e.Kind()
+	return e.kind
 }
 
 func (e err) Error() string {
