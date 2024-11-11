@@ -15,15 +15,13 @@ const (
 	// KEY_NOT_PROVIDED indicates that there is no Sec-WebSocket-Key passed in by the
 	// client.
 	KEY_NOT_PROVIDED = "the request does not specify a Sec-WebSocket-Key"
-	// HTTP_HIJACKING_FAILED indicates an error with hijacking the underlying connection
-	// from the hijacker.
+	// HTTP_HIJACKING_FAILED indicates an error with hijacking the underlying connection from
+	// http.ResponseWriter.
 	HTTP_HIJACKING_FAILED = "unable to hijack the http connection"
-	// CONNECTION_READ_ERROR indicates an error reading the underlying connection. This
-	// differs from the CONNECTION_CLOSED error.
-	CONNECTION_READ_ERROR = "reading from the connection failed: %s"
-	// CONNECTION_WRITE_ERROR indicates an error reading the underlying connection. This
-	// differs from the CONNECTION_CLOSED error.
-	CONNECTION_WRITE_ERROR = "writing to the connection failed: %s"
+	// CONNECTION_READ_ERROR indicates an error reading from the underlying connection.
+	CONNECTION_READ_ERROR = "reading from the underlying connection failed: %s"
+	// CONNECTION_WRITE_ERROR indicates an error writing to the underlying connection.
+	CONNECTION_WRITE_ERROR = "writing to the underlying connection failed: %s"
 	// CONNECTION_CLOSED indicates that the underlying connection is closed. This connection
 	// cannot be read from or written to.
 	CONNECTION_CLOSED = "connection is closed"
@@ -31,9 +29,9 @@ const (
 	MALFORMED_FRAME = "websocket frame is malformed: %s"
 )
 
-// WebsocketError implements the error interface and provides
+// Error implements the error interface and provides
 // the Kind of the error.
-type WebsocketError interface {
+type Error interface {
 	Kind() string
 	Error() string
 }
@@ -51,7 +49,7 @@ func (e err) Error() string {
 	return e.err
 }
 
-func errorf(kind string, a ...any) WebsocketError {
+func errorf(kind string, a ...any) Error {
 	return err{
 		kind: kind,
 		err:  fmt.Sprintf(kind, a...),
@@ -63,32 +61,4 @@ func errorf(kind string, a ...any) WebsocketError {
 func isUseOfClosedNetworkConnectionError(err error) bool {
 	return err == net.ErrClosed
 	// return strings.Contains(err.Error(), "use of closed network connection")
-}
-
-// manageReadError look at the error after reading and either returns a
-// CONNECTION_CLOSED or a CONNECTION_READ_ERROR. If the error passed in is nil,
-// the function will return nil as to avoid a nil pointer dereference.
-func manageReadError(err error) WebsocketError {
-	if err == nil {
-		return nil
-	}
-	if isUseOfClosedNetworkConnectionError(err) {
-		return errorf(CONNECTION_CLOSED)
-	} else {
-		return errorf(CONNECTION_READ_ERROR, err.Error())
-	}
-}
-
-// manageWriteError look at the error after reading and either returns a
-// CONNECTION_CLOSED or a CONNECTION_WRITE_ERROR. If the error passed in is nil,
-// the function will return nil as to avoid a nil pointer dereference.
-func manageWriteError(err error) WebsocketError {
-	if err == nil {
-		return nil
-	}
-	if isUseOfClosedNetworkConnectionError(err) {
-		return errorf(CONNECTION_CLOSED)
-	} else {
-		return errorf(CONNECTION_WRITE_ERROR, err.Error())
-	}
 }

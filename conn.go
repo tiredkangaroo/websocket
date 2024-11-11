@@ -3,21 +3,51 @@ package websocket
 import (
 	"context"
 	"encoding/binary"
+	"io"
 	"log/slog"
-	"net"
+	"sync"
 	"time"
 )
 
-// Conn represents a WebSocket connection.
+// Conn represents a WebSocket connection. All public methods on Conn
+// are safe to be simultaneously called.
 type Conn struct {
-	underlying net.Conn
+	underlying io.ReadWriteCloser
+	rmx        sync.Mutex
+	wmx        sync.Mutex
+	ctx        context.Context
+	cancel     context.CancelFunc
 	closed     bool
+
+	pingCtx    context.Context
+	pingCancel context.CancelFunc
+	pingMx     sync.Mutex
+}
+
+// From returns a new WebSocket Conn from a value with a type that
+// implements the io.ReadWriteCloser interface, notably net.Conn.
+// It is expected that this connection will not be read from,
+// written to, or closed once passed into this function.
+func From(c io.ReadWriteCloser) *Conn {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Conn{underlying: c, rmx: sync.Mutex{}, wmx: sync.Mutex{}, ctx: ctx, cancel: cancel, closed: false}
+}
+
+// Context returns the context used for the connection. It should
+// only be canceled using the Close function.
+func (c *Conn) Context() context.Context {
+	return c.ctx
 }
 
 // Close marks the connection as closed and closes the underlying
 // connection. It may return an error if there is an issue closing
 // the underlying connection.
 func (c *Conn) Close() error {
+	c.rmx.Lock()
+	c.wmx.Lock()
+	defer c.rmx.Unlock()
+	defer c.wmx.Unlock()
+	c.cancel()
 	c.closed = true
 	return c.underlying.Close()
 }
@@ -25,14 +55,19 @@ func (c *Conn) Close() error {
 // Read reads a WebSocket frame from the underlying connection. If there
 // is an issue reading the frame or the frame is malformed, it may return
 // an error.
-func (c Conn) Read() (*Message, WebsocketError) {
+func (c *Conn) Read() (*Message, Error) {
+	c.rmx.Lock()
+	defer c.rmx.Unlock()
+	if c.closed {
+		return nil, errorf(CONNECTION_CLOSED)
+	}
 	message := new(Message)
 
 	header := make([]byte, 2) // includes fin, rsv1, rsv2, rsv3, and opcode
 
 	n, err := c.underlying.Read(header)
 	if err != nil {
-		return nil, manageReadError(err)
+		return nil, errorf(CONNECTION_READ_ERROR, err.Error())
 	}
 	if n != 2 {
 		return nil, errorf(MALFORMED_FRAME, "read 0 bytes, expected 1")
@@ -74,6 +109,13 @@ func (c Conn) Read() (*Message, WebsocketError) {
 		}
 		message.Type = MessagePing
 	case 0xA:
+		c.pingMx.Lock()
+		if c.pingCancel != nil {
+			c.pingCancel()
+		}
+		c.pingCtx = nil
+		c.pingCancel = nil
+		c.pingMx.Unlock()
 		message.Type = MessagePong
 	default:
 		return nil, errorf(MALFORMED_FRAME, "unknown opcode")
@@ -86,14 +128,14 @@ func (c Conn) Read() (*Message, WebsocketError) {
 		extendedPayloadLen := make([]byte, 2)
 		_, err = c.underlying.Read(extendedPayloadLen)
 		if err != nil {
-			return nil, manageReadError(err)
+			return nil, errorf(CONNECTION_READ_ERROR, err.Error())
 		}
 		payloadLength = int(binary.BigEndian.Uint16(extendedPayloadLen))
 	case 127: // the following 64 bits (or 8 bytes) is the uint payload length
 		extendedPayloadLen := make([]byte, 8)
 		_, err = c.underlying.Read(extendedPayloadLen)
 		if err != nil {
-			return nil, manageReadError(err)
+			return nil, errorf(CONNECTION_READ_ERROR, err.Error())
 		}
 		payloadLength = int(binary.BigEndian.Uint64(extendedPayloadLen))
 	}
@@ -105,7 +147,7 @@ func (c Conn) Read() (*Message, WebsocketError) {
 		maskKey = make([]byte, 4)
 		_, err = c.underlying.Read(maskKey)
 		if err != nil {
-			return nil, manageReadError(err)
+			return nil, errorf(CONNECTION_READ_ERROR, err)
 		}
 	}
 
@@ -113,7 +155,7 @@ func (c Conn) Read() (*Message, WebsocketError) {
 	payload := make([]byte, payloadLength)
 	_, err = c.underlying.Read(payload)
 	if err != nil {
-		return nil, manageReadError(err)
+		return nil, errorf(CONNECTION_READ_ERROR, err)
 	}
 
 	// unmask with xor
@@ -124,13 +166,14 @@ func (c Conn) Read() (*Message, WebsocketError) {
 	}
 
 	message.Data = payload
-
 	return message, nil
 }
 
 // Write takes in a message and writes it as a WebSocket frame
 // to the underlying connection.
-func (c Conn) Write(message *Message) WebsocketError {
+func (c *Conn) Write(message *Message) Error {
+	c.wmx.Lock()
+	defer c.wmx.Unlock()
 	messageType := message.Type
 	data := message.Data
 
@@ -168,48 +211,48 @@ func (c Conn) Write(message *Message) WebsocketError {
 	frame = append(frame, data...)
 
 	_, err := c.underlying.Write(frame)
-
-	return manageWriteError(err)
+	if err != nil {
+		return errorf(CONNECTION_WRITE_ERROR, err.Error())
+	}
+	return nil
 }
 
 // Ping writes a ping frame to the connection. If a nil context is specified,
 // it will default to five seconds. If no response is reached within
 // the duration, it will return false. It may return an error if
 // there is an issue writing to the connection.
-func (c Conn) Ping(ctx context.Context) (bool, WebsocketError) {
-	err := c.Write(&Message{
-		Type: MessagePing,
-		Data: []byte{},
-	})
-	if err != nil {
-		return false, err
-	}
+//
+// If there is a ping that has not recieved a pong yet, calling this
+// function will NOT write another ping frame, but will block until it recieves
+// a pong.
+func (c *Conn) Ping(ctx context.Context) (bool, Error) {
 
-	var cancel context.CancelFunc
-	if ctx == nil {
-		ctx, cancel = context.WithTimeout(context.Background(), time.Second*5)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-
-	go func() {
-		for {
-			msg, err := c.Read()
-			if err != nil {
-				break
-			}
-			if msg.Type == MessagePong {
-				cancel()
-				break
-			}
+	c.pingMx.Lock()
+	if c.pingCtx != nil {
+		var cancel context.CancelFunc
+		if ctx == nil {
+			ctx, cancel = context.WithTimeout(context.Background(), time.Second*5)
+		} else {
+			ctx, cancel = context.WithCancel(ctx)
 		}
-	}()
+		c.pingCtx = ctx
+		c.pingCancel = cancel
+		err := c.Write(&Message{
+			Type: MessagePing,
+			Data: []byte{},
+		})
+		if err != nil {
+			return false, err
+		}
+	}
+	c.pingMx.Unlock()
 
-	<-ctx.Done()
+	<-c.pingCtx.Done()
+
 	switch ctx.Err() {
 	case context.Canceled:
 		return true, nil
-	case context.DeadlineExceeded:
+	case context.DeadlineExceeded: // a pong was not recieved in a timely manner
 		return false, nil
 	}
 	return false, nil
