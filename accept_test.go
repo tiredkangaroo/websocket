@@ -18,7 +18,9 @@ type MockResponseWriterHijack struct {
 }
 
 func (m *MockResponseWriterHijack) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return net.Conn(new(MockNetConn)), nil, nil
+	mnc := new(MockNetConn)
+	buf := bufio.NewReadWriter(bufio.NewReader(&mnc.buf), bufio.NewWriter(&mnc.buf))
+	return net.Conn(mnc), buf, nil
 }
 
 // TestAcceptHTTPSuccess checks if a valid WebSocket request is correctly accepted.

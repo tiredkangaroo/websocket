@@ -122,6 +122,23 @@ func TestWrite_MessageText(t *testing.T) {
 	}
 }
 
+func TestRead_MessageText(t *testing.T) {
+	mockConn := &MockNetConn{}
+	conn := websocket.From(mockConn)
+	mockConn.buf.Write([]byte("this is a hello world!"))
+
+	expected := []byte{0x81, 0x16}
+	expected = append(expected, []byte("this is a hello world!")...)
+
+	msg, err := conn.Read()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	if !bytes.Equal(msg.Data, expected) {
+		t.Fatalf("Expected %v, got %v", expected, mockConn.buf.Bytes())
+	}
+}
+
 func TestPing_PongReceived(t *testing.T) {
 	mockConn := &MockNetConn{}
 	conn := websocket.From(mockConn)
