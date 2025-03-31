@@ -2,11 +2,13 @@ package websocket_test
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"websocket"
+
+	"github.com/tiredkangaroo/websocket"
 )
 
 type MockResponseWriterNoHijack struct {
@@ -17,10 +19,12 @@ type MockResponseWriterHijack struct {
 	httptest.ResponseRecorder
 }
 
+var hijack_mock_conn = new(MockNetConn)
+var hijack_bufioreadwriter = bufio.NewReadWriter(bufio.NewReader(&hijack_mock_conn.buf), bufio.NewWriter(&hijack_mock_conn.buf))
+var hijack_net_conn = net.Conn(hijack_mock_conn)
+
 func (m *MockResponseWriterHijack) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	mnc := new(MockNetConn)
-	buf := bufio.NewReadWriter(bufio.NewReader(&mnc.buf), bufio.NewWriter(&mnc.buf))
-	return net.Conn(mnc), buf, nil
+	return hijack_net_conn, hijack_bufioreadwriter, nil
 }
 
 // TestAcceptHTTPSuccess checks if a valid WebSocket request is correctly accepted.
@@ -42,6 +46,10 @@ func TestAcceptHTTPSuccess(t *testing.T) {
 	}
 	if rec.Result().StatusCode != http.StatusSwitchingProtocols {
 		t.Errorf("expected status %d, got %d", http.StatusSwitchingProtocols, rec.Result().StatusCode)
+	}
+	if rec.Result().Header.Get("Sec-WebSocket-Accept") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" {
+		fmt.Println(rec.Result().Header.Get("Sec-WebSocket-Accept"))
+		t.Errorf("bad accept key")
 	}
 }
 

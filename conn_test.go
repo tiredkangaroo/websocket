@@ -8,7 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"websocket"
+
+	"github.com/tiredkangaroo/websocket"
 )
 
 // MockNetConn implements net.Conn for testing.
@@ -59,14 +60,6 @@ func (m *MockNetConn) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
 
-func TestContext(t *testing.T) {
-	mockConn := &MockNetConn{}
-	conn := websocket.From(mockConn)
-	if conn.Context() == nil {
-		t.Fatalf("expected Context() not be nil")
-	}
-}
-
 func TestClose(t *testing.T) {
 	mockConn := &MockNetConn{}
 	conn := websocket.From(mockConn)
@@ -78,9 +71,6 @@ func TestClose(t *testing.T) {
 	if !mockConn.closed {
 		t.Fatalf("Expected underlying connection to be closed")
 	}
-	if conn.Context().Err() != context.Canceled {
-		t.Fatalf("Expected context to be canceled")
-	}
 }
 
 func TestRead_ClosedConnection(t *testing.T) {
@@ -89,8 +79,8 @@ func TestRead_ClosedConnection(t *testing.T) {
 	conn.Close()
 
 	_, err := conn.Read()
-	if err == nil || err.Kind() != websocket.CONNECTION_CLOSED {
-		t.Fatalf("Expected CONNECTION_CLOSED error, got %v", err)
+	if err != websocket.ErrConnectionClosed {
+		t.Fatalf("Expected ErrConnectionClosed error, got %v", err)
 	}
 }
 
@@ -101,8 +91,8 @@ func TestRead_MalformedFrame(t *testing.T) {
 	// unsupported opcode (0x3):
 	mockConn.buf.Write([]byte{0x83, 0x00})
 	_, err := conn.Read()
-	if err == nil || err.Kind() != websocket.MALFORMED_FRAME {
-		t.Fatalf("Expected MALFORMED_FRAME error, got %v", err)
+	if err != websocket.ErrMalformedFrame {
+		t.Fatalf("Expected ErrMalformedFrame error, got %v", err)
 	}
 }
 
