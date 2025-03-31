@@ -189,10 +189,12 @@ func (c *Conn) Write(message *Message) error {
 		frame = append(frame, byte(payloadLength))
 	} else if payloadLength < 65536 { // the following 16 bits is the payload length
 		frame = append(frame, byte(126))
-		binary.BigEndian.PutUint16(frame[1:3], uint16(payloadLength))
+		frame = frame[:4]
+		binary.BigEndian.PutUint16(frame[2:4], uint16(payloadLength))
 	} else { // the following 64 bits is the payload length
 		frame = append(frame, byte(127))
-		binary.BigEndian.PutUint64(frame[1:9], uint64(payloadLength))
+		frame = frame[:10]
+		binary.BigEndian.PutUint64(frame[2:10], uint64(payloadLength))
 	}
 
 	// TODO: wonder if we should add data to frame (requires a copy), or just call
